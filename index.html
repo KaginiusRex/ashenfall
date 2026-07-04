@@ -118,6 +118,130 @@ let sword; // reference for visual swing flash
 
 const CIRCLE_RADIUS = 6;
 
+// ---------- PROCEDURAL TEXTURES ----------
+// All textures are generated on the fly with <canvas> so the demo stays a single self-contained file.
+function makeCanvasTexture(size, draw, repeatX, repeatY){
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  draw(ctx, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeatX || 1, repeatY || 1);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function makeGroundTexture(){
+  return makeCanvasTexture(256, (ctx, s) => {
+    ctx.fillStyle = '#3a2f1c';
+    ctx.fillRect(0,0,s,s);
+    for (let i=0;i<3000;i++){
+      const x = Math.random()*s, y = Math.random()*s;
+      const g = 40 + Math.random()*60;
+      ctx.fillStyle = Math.random() > 0.5
+        ? `rgba(${60+g*0.3},${50+g*0.4},${20+g*0.2},0.5)`
+        : `rgba(20,15,8,0.4)`;
+      ctx.beginPath();
+      ctx.arc(x,y, 0.6+Math.random()*1.6, 0, Math.PI*2);
+      ctx.fill();
+    }
+    for (let i=0;i<140;i++){
+      const x = Math.random()*s, y = Math.random()*s;
+      ctx.fillStyle = `rgba(${70+Math.random()*40},${90+Math.random()*40},${30+Math.random()*20},0.35)`;
+      ctx.beginPath();
+      ctx.arc(x,y, 3+Math.random()*8, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }, 12, 12);
+}
+
+function makeRockTexture(repeatX, repeatY){
+  return makeCanvasTexture(256, (ctx, s) => {
+    ctx.fillStyle = '#4a4438';
+    ctx.fillRect(0,0,s,s);
+    for (let i=0;i<2200;i++){
+      const x = Math.random()*s, y = Math.random()*s;
+      const c = 74 + (Math.random()*60-30);
+      ctx.fillStyle = `rgba(${c},${c-6},${c-14},0.5)`;
+      ctx.fillRect(x,y,1.5,1.5);
+    }
+    ctx.strokeStyle = 'rgba(20,18,14,0.5)';
+    ctx.lineWidth = 1;
+    for (let i=0;i<16;i++){
+      ctx.beginPath();
+      let x = Math.random()*s, y = Math.random()*s;
+      ctx.moveTo(x,y);
+      for (let j=0;j<5;j++){
+        x += (Math.random()-0.5)*40;
+        y += (Math.random()-0.5)*40;
+        ctx.lineTo(x,y);
+      }
+      ctx.stroke();
+    }
+  }, repeatX || 2, repeatY || 2);
+}
+
+function makeMossyRockTexture(repeatX, repeatY){
+  return makeCanvasTexture(256, (ctx, s) => {
+    ctx.fillStyle = '#5b5346';
+    ctx.fillRect(0,0,s,s);
+    for (let i=0;i<2400;i++){
+      const x = Math.random()*s, y = Math.random()*s;
+      const c = 91 + (Math.random()*50-25);
+      ctx.fillStyle = `rgba(${c},${c-8},${c-20},0.45)`;
+      ctx.fillRect(x,y,1.4,1.4);
+    }
+    for (let i=0;i<220;i++){
+      const x = Math.random()*s, y = Math.random()*s;
+      ctx.fillStyle = `rgba(${40+Math.random()*30},${60+Math.random()*30},${20+Math.random()*15},0.4)`;
+      ctx.beginPath();
+      ctx.arc(x,y,1+Math.random()*3,0,Math.PI*2);
+      ctx.fill();
+    }
+  }, repeatX || 1.5, repeatY || 1.5);
+}
+
+function makeWoodTexture(repeatX, repeatY){
+  return makeCanvasTexture(128, (ctx, s) => {
+    ctx.fillStyle = '#4a331d';
+    ctx.fillRect(0,0,s,s);
+    for (let y=0;y<s;y+=3){
+      const shade = 60 + Math.sin(y*0.3)*20 + Math.random()*10;
+      ctx.fillStyle = `rgba(${shade+20},${shade},${shade-25},0.5)`;
+      ctx.fillRect(0,y,s,2);
+    }
+  }, repeatX || 1, repeatY || 4);
+}
+
+function makeMetalTexture(repeatX, repeatY){
+  return makeCanvasTexture(128, (ctx, s) => {
+    ctx.fillStyle = '#c9d2da';
+    ctx.fillRect(0,0,s,s);
+    for (let y=0;y<s;y++){
+      const shade = 190 + Math.sin(y*0.5)*20 + (Math.random()*14-7);
+      ctx.fillStyle = `rgba(${shade},${shade+4},${shade+8},0.4)`;
+      ctx.fillRect(0,y,s,1);
+    }
+  }, repeatX || 1, repeatY || 6);
+}
+
+function makeLeafTexture(){
+  return makeCanvasTexture(128, (ctx, s) => {
+    ctx.fillStyle = '#1c2812';
+    ctx.fillRect(0,0,s,s);
+    for (let i=0;i<800;i++){
+      const x = Math.random()*s, y = Math.random()*s;
+      const c = 30+Math.random()*40;
+      ctx.fillStyle = `rgba(${c-10},${c+30},${c-15},0.5)`;
+      ctx.beginPath();
+      ctx.arc(x,y,0.8+Math.random()*2,0,Math.PI*2);
+      ctx.fill();
+    }
+  }, 1, 1);
+}
+
 init();
 
 function init(){
@@ -196,14 +320,14 @@ function buildEnvironment(){
   scene.add(dir);
 
   const groundGeo = new THREE.CircleGeometry(20, 48);
-  const groundMat = new THREE.MeshStandardMaterial({ color: 0x2a2115, roughness: 1 });
+  const groundMat = new THREE.MeshStandardMaterial({ map: makeGroundTexture(), roughness: 1 });
   ground = new THREE.Mesh(groundGeo, groundMat);
   ground.rotation.x = -Math.PI/2;
   scene.add(ground);
 
   // stone circle ring
   const ringGeo = new THREE.TorusGeometry(CIRCLE_RADIUS, 0.15, 8, 48);
-  const ringMat = new THREE.MeshStandardMaterial({ color: 0x4a4030, roughness: 0.8 });
+  const ringMat = new THREE.MeshStandardMaterial({ map: makeRockTexture(6, 1), roughness: 0.8 });
   const ring = new THREE.Mesh(ringGeo, ringMat);
   ring.rotation.x = Math.PI/2;
   ring.position.y = 0.02;
@@ -211,7 +335,7 @@ function buildEnvironment(){
 
   // standing stones around the circle
   const stoneGeo = new THREE.BoxGeometry(0.5, 2.2, 0.35);
-  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x3d3527, roughness: 1 });
+  const stoneMat = new THREE.MeshStandardMaterial({ map: makeRockTexture(1, 2), roughness: 1 });
   for (let i = 0; i < 8; i++){
     const a = (i / 8) * Math.PI * 2;
     const stone = new THREE.Mesh(stoneGeo, stoneMat);
@@ -222,8 +346,8 @@ function buildEnvironment(){
   }
 
   // distant trees (simple cones) beyond the circle for atmosphere
-  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x241a10 });
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0x1c2812 });
+  const trunkMat = new THREE.MeshStandardMaterial({ map: makeWoodTexture(1, 3) });
+  const leafMat = new THREE.MeshStandardMaterial({ map: makeLeafTexture() });
   for (let i = 0; i < 24; i++){
     const a = Math.random() * Math.PI * 2;
     const r = 9 + Math.random() * 8;
@@ -240,13 +364,13 @@ function buildEnvironment(){
 function buildBoss(){
   const group = new THREE.Group();
 
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x5b5346, roughness: 0.9, metalness: 0.1 });
+  const bodyMat = new THREE.MeshStandardMaterial({ map: makeMossyRockTexture(1.5, 2), roughness: 0.9, metalness: 0.1 });
   const body = new THREE.Mesh(new THREE.IcosahedronGeometry(0.9, 0), bodyMat);
   body.position.y = 1.3;
   body.scale.set(1, 1.3, 0.9);
   group.add(body);
 
-  const headMat = new THREE.MeshStandardMaterial({ color: 0x6b6050, roughness: 0.85 });
+  const headMat = new THREE.MeshStandardMaterial({ map: makeMossyRockTexture(1, 1), roughness: 0.85 });
   const head = new THREE.Mesh(new THREE.DodecahedronGeometry(0.45, 0), headMat);
   head.position.y = 2.5;
   group.add(head);
@@ -259,7 +383,7 @@ function buildBoss(){
   group.add(eyeL); group.add(eyeR);
 
   // arms
-  const armMat = new THREE.MeshStandardMaterial({ color: 0x504736, roughness: 0.9 });
+  const armMat = new THREE.MeshStandardMaterial({ map: makeMossyRockTexture(1, 2), roughness: 0.9 });
   const armGeo = new THREE.CylinderGeometry(0.18,0.22,1.3,6);
   const armL = new THREE.Mesh(armGeo, armMat);
   const armR = armL.clone();
@@ -301,8 +425,8 @@ function buildControllers(){
   controller2.addEventListener('squeezestart', onSqueeze);
 
   // sword for right hand
-  const bladeMat = new THREE.MeshStandardMaterial({ color: 0xcfd6dd, metalness: 0.8, roughness: 0.25 });
-  const hiltMat = new THREE.MeshStandardMaterial({ color: 0x3a2a18, roughness: 0.7 });
+  const bladeMat = new THREE.MeshStandardMaterial({ map: makeMetalTexture(1, 8), metalness: 0.8, roughness: 0.25 });
+  const hiltMat = new THREE.MeshStandardMaterial({ map: makeWoodTexture(1, 2), roughness: 0.7 });
   rightWeapon = new THREE.Group();
   const blade = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.5, 0.015), bladeMat);
   blade.position.y = 0.32;
@@ -315,7 +439,7 @@ function buildControllers(){
 
   // bow for left hand
   leftWeapon = new THREE.Group();
-  const bowMat = new THREE.MeshStandardMaterial({ color: 0x5a3d22, roughness: 0.6 });
+  const bowMat = new THREE.MeshStandardMaterial({ map: makeWoodTexture(4, 1), roughness: 0.6 });
   const bow = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.015, 6, 16, Math.PI*1.3), bowMat);
   bow.rotation.z = Math.PI/2;
   leftWeapon.add(bow);

@@ -48,7 +48,7 @@
   Left trigger: loose an arrow &nbsp;·&nbsp; Left grip: open/close inventory &nbsp;·&nbsp; Point right hand + trigger to select
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" crossorigin="anonymous"></script>
 <script>
 (function(){
 

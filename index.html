@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ashenfall — VR Combat Trial</title>
+<style>
+  @font-face { font-family: 'system'; src: local('Georgia'); }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: radial-gradient(ellipse at center, #2b1f14 0%, #0a0704 70%, #000000 100%);
+    overflow: hidden;
+    font-family: Georgia, 'Times New Roman', serif;
+    color: #e8dcc4;
+  }
+  canvas { display: block; }
+
+  #overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 10;
+    text-align: center;
+    pointer-events: none;
+  }
+  #overlay > * { pointer-events: auto; }
+  #title {
+    font-size: 42px;
+    letter-spacing: 4px;
+    color: #d9a441;
+    text-shadow: 0 0 18px rgba(217,164,65,0.5), 0 2px 2px #000;
+    margin-bottom: 4px;
+  }
+  #subtitle {
+    font-size: 15px;
+    letter-spacing: 3px;
+    color: #a8916b;
+    text-transform: uppercase;
+    margin-bottom: 40px;
+  }
+  #brief {
+    max-width: 480px;
+    font-size: 15px;
+    line-height: 1.7;
+    color: #c9b98f;
+    border-top: 1px solid #59452a;
+    border-bottom: 1px solid #59452a;
+    padding: 18px 0;
+    margin-bottom: 34px;
+  }
+  #brief b { color: #e8dcc4; }
+  #enterVR {
+    background: linear-gradient(180deg, #b8863f, #8a5a2b);
+    border: 1px solid #d9a441;
+    color: #1b120a;
+    font-family: Georgia, serif;
+    font-weight: bold;
+    font-size: 18px;
+    letter-spacing: 2px;
+    padding: 16px 46px;
+    border-radius: 3px;
+    cursor: pointer;
+    text-transform: uppercase;
+    box-shadow: 0 0 24px rgba(217,164,65,0.35);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  #enterVR:hover { transform: translateY(-2px); box-shadow: 0 0 32px rgba(217,164,65,0.55); }
+  #enterVR:disabled { opacity: 0.4; cursor: default; transform: none; }
+  #note {
+    margin-top: 22px;
+    font-size: 12px;
+    letter-spacing: 1px;
+    color: #6f5c3d;
+    max-width: 420px;
+  }
+  #hint {
+    position: absolute; bottom: 18px; left: 0; right: 0;
+    text-align: center; font-size: 12px; color: #6f5c3d; letter-spacing: 1px;
+    z-index: 10;
+  }
+</style>
+</head>
+<body>
+
+<div id="overlay">
+  <div id="title">ASHENFALL</div>
+  <div id="subtitle">Trial of the Deep-Warden — VR Combat Demo</div>
+  <div id="brief">
+    A stone guardian wakes in the ruined watch-circle. Face it with
+    <b>steel</b>, <b>arrow</b>, and <b>flame</b> — a hands-on taste of Ashenfall's
+    three combat trees, built to try right now on your headset.
+  </div>
+  <button id="enterVR">Enter the Circle</button>
+  <div id="note">Requires a secure (https) connection and a WebXR-capable browser — the Meta Quest Browser works out of the box.</div>
+</div>
+
+<div id="hint" style="display:none;">
+  Right hand: swing the blade &nbsp;·&nbsp; Left trigger: loose an arrow &nbsp;·&nbsp; Either grip: cast a flame ward
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+
+let scene, camera, renderer, clock;
+let ground, boss, bossHealthFill, bossHealthMax = 100, bossHealth = 100, bossDefeated = false, bossRespawnTimer = 0;
+let controller1, controller2; // 0 = right (typical), 1 = left -- we detect by handedness at connect time
+let rightController = null, leftController = null;
+let rightWeapon, leftWeapon;
+let prevRightPos = new THREE.Vector3();
+let rightVelocity = 0;
+let swingCooldown = 0;
+let arrows = [];
+let fireballs = [];
+let manaFraction = 1.0;
+let manaBarFill;
+let floatingTexts = [];
+let sword; // reference for visual swing flash
+
+const CIRCLE_RADIUS = 6;
+
+init();
+
+function init(){
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0e0a06);
+  scene.fog = new THREE.FogExp2(0x0e0a06, 0.035);
+
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.05, 100);
+  camera.position.set(0, 1.6, 4);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
+
+  clock = new THREE.Clock();
+
+  buildEnvironment();
+  buildBoss();
+  buildControllers();
+  buildManaHud();
+
+  window.addEventListener('resize', onResize);
+
+  const btn = document.getElementById('enterVR');
+  if (!navigator.xr) {
+    btn.textContent = 'WebXR Not Available';
+    btn.disabled = true;
+  } else {
+    btn.addEventListener('click', startXR);
+  }
+
+  renderer.setAnimationLoop(render);
+}
+
+function startXR(){
+  navigator.xr.isSessionSupported('immersive-vr').then(supported => {
+    if (!supported) {
+      document.getElementById('enterVR').textContent = 'Headset Not Detected';
+      return;
+    }
+    navigator.xr.requestSession('immersive-vr', {
+      optionalFeatures: ['local-floor', 'bounded-floor']
+    }).then(onSessionStarted);
+  });
+}
+
+function onSessionStarted(session){
+  renderer.xr.setSession(session);
+  document.getElementById('overlay').style.display = 'none';
+  document.getElementById('hint').style.display = 'block';
+  session.addEventListener('end', () => {
+    document.getElementById('overlay').style.display = 'flex';
+    document.getElementById('hint').style.display = 'none';
+  });
+}
+
+function onResize(){
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+// ---------- ENVIRONMENT ----------
+function buildEnvironment(){
+  const hemi = new THREE.HemisphereLight(0x6b5a3d, 0x1a1408, 0.9);
+  scene.add(hemi);
+
+  const torchLight = new THREE.PointLight(0xff8c3a, 1.4, 14);
+  torchLight.position.set(0, 2.4, 0);
+  scene.add(torchLight);
+
+  const dir = new THREE.DirectionalLight(0x8899bb, 0.25);
+  dir.position.set(-3, 6, -2);
+  scene.add(dir);
+
+  const groundGeo = new THREE.CircleGeometry(20, 48);
+  const groundMat = new THREE.MeshStandardMaterial({ color: 0x2a2115, roughness: 1 });
+  ground = new THREE.Mesh(groundGeo, groundMat);
+  ground.rotation.x = -Math.PI/2;
+  scene.add(ground);
+
+  // stone circle ring
+  const ringGeo = new THREE.TorusGeometry(CIRCLE_RADIUS, 0.15, 8, 48);
+  const ringMat = new THREE.MeshStandardMaterial({ color: 0x4a4030, roughness: 0.8 });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.rotation.x = Math.PI/2;
+  ring.position.y = 0.02;
+  scene.add(ring);
+
+  // standing stones around the circle
+  const stoneGeo = new THREE.BoxGeometry(0.5, 2.2, 0.35);
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x3d3527, roughness: 1 });
+  for (let i = 0; i < 8; i++){
+    const a = (i / 8) * Math.PI * 2;
+    const stone = new THREE.Mesh(stoneGeo, stoneMat);
+    stone.position.set(Math.cos(a) * CIRCLE_RADIUS, 1.1, Math.sin(a) * CIRCLE_RADIUS);
+    stone.rotation.y = -a;
+    stone.rotation.z = (Math.random()-0.5) * 0.1;
+    scene.add(stone);
+  }
+
+  // distant trees (simple cones) beyond the circle for atmosphere
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x241a10 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x1c2812 });
+  for (let i = 0; i < 24; i++){
+    const a = Math.random() * Math.PI * 2;
+    const r = 9 + Math.random() * 8;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.2,1.6,6), trunkMat);
+    const leaf = new THREE.Mesh(new THREE.ConeGeometry(1.1, 2.6, 7), leafMat);
+    const x = Math.cos(a)*r, z = Math.sin(a)*r;
+    trunk.position.set(x, 0.8, z);
+    leaf.position.set(x, 2.4, z);
+    scene.add(trunk); scene.add(leaf);
+  }
+}
+
+// ---------- BOSS ----------
+function buildBoss(){
+  const group = new THREE.Group();
+
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x5b5346, roughness: 0.9, metalness: 0.1 });
+  const body = new THREE.Mesh(new THREE.IcosahedronGeometry(0.9, 0), bodyMat);
+  body.position.y = 1.3;
+  body.scale.set(1, 1.3, 0.9);
+  group.add(body);
+
+  const headMat = new THREE.MeshStandardMaterial({ color: 0x6b6050, roughness: 0.85 });
+  const head = new THREE.Mesh(new THREE.DodecahedronGeometry(0.45, 0), headMat);
+  head.position.y = 2.5;
+  group.add(head);
+
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0xff5522, emissive: 0xff3300, emissiveIntensity: 1.5 });
+  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.07,8,8), eyeMat);
+  const eyeR = eyeL.clone();
+  eyeL.position.set(-0.16, 2.52, 0.35);
+  eyeR.position.set(0.16, 2.52, 0.35);
+  group.add(eyeL); group.add(eyeR);
+
+  // arms
+  const armMat = new THREE.MeshStandardMaterial({ color: 0x504736, roughness: 0.9 });
+  const armGeo = new THREE.CylinderGeometry(0.18,0.22,1.3,6);
+  const armL = new THREE.Mesh(armGeo, armMat);
+  const armR = armL.clone();
+  armL.position.set(-1.0, 1.5, 0); armL.rotation.z = 0.4;
+  armR.position.set(1.0, 1.5, 0); armR.rotation.z = -0.4;
+  group.add(armL); group.add(armR);
+
+  group.position.set(0, 0, -3.2);
+  group.userData.baseY = group.position.y;
+  group.userData.bobPhase = Math.random()*Math.PI*2;
+  scene.add(group);
+  boss = group;
+
+  // health bar (billboard)
+  const barGroup = new THREE.Group();
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.14), new THREE.MeshBasicMaterial({ color: 0x1a1108 }));
+  const fill = new THREE.Mesh(new THREE.PlaneGeometry(1.36, 0.1), new THREE.MeshBasicMaterial({ color: 0xb02020 }));
+  fill.position.z = 0.001;
+  barGroup.add(back); barGroup.add(fill);
+  barGroup.position.set(0, 3.3, -3.2);
+  scene.add(barGroup);
+  bossHealthFill = fill;
+  boss.userData.barGroup = barGroup;
+}
+
+// ---------- CONTROLLERS ----------
+function buildControllers(){
+  controller1 = renderer.xr.getController(0);
+  controller2 = renderer.xr.getController(1);
+  scene.add(controller1);
+  scene.add(controller2);
+
+  controller1.addEventListener('connected', function(e){ assignHand(this, e.data); });
+  controller2.addEventListener('connected', function(e){ assignHand(this, e.data); });
+
+  controller1.addEventListener('selectstart', onTrigger);
+  controller2.addEventListener('selectstart', onTrigger);
+  controller1.addEventListener('squeezestart', onSqueeze);
+  controller2.addEventListener('squeezestart', onSqueeze);
+
+  // sword for right hand
+  const bladeMat = new THREE.MeshStandardMaterial({ color: 0xcfd6dd, metalness: 0.8, roughness: 0.25 });
+  const hiltMat = new THREE.MeshStandardMaterial({ color: 0x3a2a18, roughness: 0.7 });
+  rightWeapon = new THREE.Group();
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.5, 0.015), bladeMat);
+  blade.position.y = 0.32;
+  const hilt = new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.02,0.14,8), hiltMat);
+  hilt.position.y = 0.02;
+  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.14,0.02,0.02), hiltMat);
+  guard.position.y = 0.1;
+  rightWeapon.add(blade); rightWeapon.add(hilt); rightWeapon.add(guard);
+  sword = blade;
+
+  // bow for left hand
+  leftWeapon = new THREE.Group();
+  const bowMat = new THREE.MeshStandardMaterial({ color: 0x5a3d22, roughness: 0.6 });
+  const bow = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.015, 6, 16, Math.PI*1.3), bowMat);
+  bow.rotation.z = Math.PI/2;
+  leftWeapon.add(bow);
+}
+
+function assignHand(controller, inputData){
+  if (inputData.handedness === 'right'){
+    rightController = controller;
+    if (rightWeapon.parent !== controller) controller.add(rightWeapon);
+  } else if (inputData.handedness === 'left'){
+    leftController = controller;
+    if (leftWeapon.parent !== controller) controller.add(leftWeapon);
+    if (manaBarFill && manaBarFill.parent.parent !== controller) controller.add(manaBarFill.parent);
+  }
+}
+
+function onTrigger(event){
+  const controller = event.target;
+  if (controller === leftController || (leftController === null && controller === controller2)){
+    shootArrow(controller);
+  } else {
+    // right trigger acts as a reinforced swing pulse too
+    triggerSwingFlash();
+  }
+}
+
+function onSqueeze(event){
+  castFireball(event.target);
+}
+
+// ---------- COMBAT ACTIONS ----------
+function shootArrow(controller){
+  const geo = new THREE.CylinderGeometry(0.008, 0.008, 0.35, 6);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x2e2412 });
+  const arrow = new THREE.Mesh(geo, mat);
+  arrow.rotation.x = Math.PI/2;
+
+  const worldPos = new THREE.Vector3();
+  const worldQuat = new THREE.Quaternion();
+  controller.getWorldPosition(worldPos);
+  controller.getWorldQuaternion(worldQuat);
+
+  arrow.position.copy(worldPos);
+  arrow.quaternion.copy(worldQuat);
+
+  const dir = new THREE.Vector3(0,0,-1).applyQuaternion(worldQuat).normalize();
+  arrow.userData.velocity = dir.multiplyScalar(9);
+  arrow.userData.life = 3;
+  arrow.userData.damage = 8;
+  scene.add(arrow);
+  arrows.push(arrow);
+}
+
+function castFireball(controller){
+  if (manaFraction < 0.24) { flashManaEmpty(); return; }
+  manaFraction -= 0.25;
+
+  const geo = new THREE.SphereGeometry(0.09, 10, 10);
+  const mat = new THREE.MeshStandardMaterial({ color: 0xff6a1a, emissive: 0xff4400, emissiveIntensity: 2 });
+  const ball = new THREE.Mesh(geo, mat);
+  const light = new THREE.PointLight(0xff6a1a, 1.2, 3);
+  ball.add(light);
+
+  const worldPos = new THREE.Vector3();
+  const worldQuat = new THREE.Quaternion();
+  controller.getWorldPosition(worldPos);
+  controller.getWorldQuaternion(worldQuat);
+  ball.position.copy(worldPos);
+
+  const dir = new THREE.Vector3(0,0,-1).applyQuaternion(worldQuat).normalize();
+  ball.userData.velocity = dir.multiplyScalar(5.5);
+  ball.userData.life = 3;
+  ball.userData.damage = 20;
+  scene.add(ball);
+  fireballs.push(ball);
+}
+
+function flashManaEmpty(){
+  if (!manaBarFill) return;
+  const orig = manaBarFill.material.color.getHex();
+  manaBarFill.material.color.setHex(0x552222);
+  setTimeout(() => { if (manaBarFill) manaBarFill.material.color.setHex(0x2266ff); }, 150);
+}
+
+function triggerSwingFlash(){
+  if (!sword) return;
+  sword.material.emissive = new THREE.Color(0xffffff);
+  sword.material.emissiveIntensity = 0.6;
+  setTimeout(()=>{ if(sword) sword.material.emissiveIntensity = 0; }, 120);
+}
+
+function buildManaHud(){
+  const group = new THREE.Group();
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.03), new THREE.MeshBasicMaterial({ color: 0x111111 }));
+  const fill = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.02), new THREE.MeshBasicMaterial({ color: 0x2266ff }));
+  fill.position.z = 0.001;
+  group.add(back); group.add(fill);
+  group.position.set(0, 0.08, -0.08);
+  group.rotation.x = -Math.PI/4;
+  manaBarFill = fill;
+  // parented to left controller once connected (see assignHand); keep in scene meanwhile
+  scene.add(group);
+}
+
+// ---------- DAMAGE / FEEDBACK ----------
+function damageBoss(amount){
+  if (bossDefeated) return;
+  bossHealth = Math.max(0, bossHealth - amount);
+  const frac = bossHealth / bossHealthMax;
+  bossHealthFill.scale.x = Math.max(0.001, frac);
+  bossHealthFill.position.x = -0.68 * (1 - frac);
+
+  boss.children.forEach(m => {
+    if (m.material && m.material.emissive !== undefined){
+      const prevColor = m.material.color.getHex();
+      m.material.emissive.setHex(0xffffff);
+      setTimeout(()=>{ if(m.material) m.material.emissive.setHex(0x000000); }, 80);
+    }
+  });
+
+  if (bossHealth <= 0){
+    defeatBoss();
+  }
+}
+
+function defeatBoss(){
+  bossDefeated = true;
+  bossRespawnTimer = 5;
+}
+
+function respawnBoss(){
+  bossHealth = bossHealthMax;
+  bossDefeated = false;
+  boss.scale.set(1,1,1);
+  boss.rotation.set(0,0,0);
+  boss.position.y = 0;
+  bossHealthFill.scale.x = 1;
+  bossHealthFill.position.x = 0;
+  boss.userData.barGroup.visible = true;
+}
+
+// ---------- MAIN LOOP ----------
+function render(){
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.getElapsedTime();
+
+  // mana regen
+  manaFraction = Math.min(1, manaFraction + dt * 0.06);
+  if (manaBarFill){
+    manaBarFill.scale.x = Math.max(0.001, manaFraction);
+    manaBarFill.position.x = -0.075 * (1 - manaFraction);
+  }
+
+  // boss idle bob / lunge
+  if (boss){
+    if (!bossDefeated){
+      boss.position.y = boss.userData.baseY + Math.sin(t*1.4 + boss.userData.bobPhase) * 0.06;
+      const lunge = Math.max(0, Math.sin(t*0.5)) * 0.4;
+      boss.position.z = -3.2 + lunge;
+      boss.rotation.y = Math.sin(t*0.3) * 0.3;
+      boss.userData.barGroup.position.set(boss.position.x, 3.3, boss.position.z);
+      boss.userData.barGroup.quaternion.copy(camera.quaternion);
+    } else {
+      boss.scale.multiplyScalar(0.94);
+      boss.rotation.z += dt * 3;
+      boss.userData.barGroup.visible = false;
+      bossRespawnTimer -= dt;
+      if (bossRespawnTimer <= 0) respawnBoss();
+    }
+  }
+
+  // melee swing detection (right controller)
+  if (rightController){
+    const pos = new THREE.Vector3();
+    rightController.getWorldPosition(pos);
+    const vel = pos.distanceTo(prevRightPos) / dt;
+    rightVelocity = vel;
+    prevRightPos.copy(pos);
+
+    swingCooldown -= dt;
+    if (vel > 2.2 && swingCooldown <= 0 && !bossDefeated){
+      const bossPos = new THREE.Vector3();
+      boss.getWorldPosition(bossPos);
+      bossPos.y = 1.3;
+      if (pos.distanceTo(bossPos) < 1.6){
+        damageBoss(14);
+        triggerSwingFlash();
+        swingCooldown = 0.35;
+      }
+    }
+  }
+
+  // arrows
+  for (let i = arrows.length-1; i >= 0; i--){
+    const a = arrows[i];
+    a.position.addScaledVector(a.userData.velocity, dt);
+    a.userData.life -= dt;
+    const bossPos = new THREE.Vector3();
+    if (boss) { boss.getWorldPosition(bossPos); bossPos.y = 1.3; }
+    if (!bossDefeated && boss && a.position.distanceTo(bossPos) < 1.0){
+      damageBoss(a.userData.damage);
+      scene.remove(a);
+      arrows.splice(i,1);
+      continue;
+    }
+    if (a.userData.life <= 0){
+      scene.remove(a);
+      arrows.splice(i,1);
+    }
+  }
+
+  // fireballs
+  for (let i = fireballs.length-1; i >= 0; i--){
+    const f = fireballs[i];
+    f.position.addScaledVector(f.userData.velocity, dt);
+    f.userData.life -= dt;
+    const bossPos = new THREE.Vector3();
+    if (boss) { boss.getWorldPosition(bossPos); bossPos.y = 1.3; }
+    if (!bossDefeated && boss && f.position.distanceTo(bossPos) < 1.1){
+      damageBoss(f.userData.damage);
+      scene.remove(f);
+      fireballs.splice(i,1);
+      continue;
+    }
+    if (f.userData.life <= 0){
+      scene.remove(f);
+      fireballs.splice(i,1);
+    }
+  }
+
+  renderer.render(scene, camera);
+}
+
+})();
+</script>
+</body>
+</html>
